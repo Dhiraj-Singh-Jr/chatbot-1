@@ -11,7 +11,7 @@ GOOGLE_API_KEY = os.getenv('GEMINI_API_KEY')
 
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
-MODEL_ID = "gemini-2.5-pro-exp-03-25"
+MODEL_ID = "gemini-2.5-pro-preview-03-25"
 COMPANY = st.text_input("Enter company name", "Alphabet")
 
 sys_instruction = """

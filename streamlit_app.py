@@ -1,56 +1,74 @@
-import streamlit as st
-from openai import OpenAI
+from google.colab import userdata
+from google import genai
+from google.genai.types import GenerateContentConfig, Tool
+from IPython.display import display, HTML, Markdown
+import io
+import json
+import re
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
+# Load Gemini API key securely from Colab userdata
+GOOGLE_API_KEY = userdata.get('GOOGLE_API_KEY')
+client = genai.Client(api_key=GOOGLE_API_KEY)
+
+# Select Gemini Model (Use 2.5 Pro if available to you)
+MODEL_ID = "gemini-2.5-pro-exp-03-25"  # or "gemini-2.5-pro"
+
+# Define the company to research
+COMPANY = 'Alphabet'  # You can change this to any company
+
+# ✨ Enhanced System Instruction for extensive report generation
+sys_instruction = """
+You are a top-tier financial analyst conducting a detailed research report on a major company.
+
+When given a company name, your report must cover the following sections:
+
+1. **Company Overview**: History, founder(s), mission, and vision.
+2. **Business Model**: Revenue sources, products, and services.
+3. **Financial Performance**: Key financials (revenue, net income, market cap, etc.).
+4. **Market Position**: Competitors, market share, and global reach.
+5. **Recent News and Developments**: Key updates from the past 6–12 months.
+6. **Leadership and Management**: CEO, executive team, and board structure.
+7. **SWOT Analysis**: Strengths, Weaknesses, Opportunities, and Threats.
+8. **Future Outlook and Strategy**: Growth strategy, innovation, and long-term goals.
+
+Use Google Search to get the most current and grounded data. Structure your output clearly and concisely.
+
+When ready to write the final report, begin the section with a line of dashes (`---`). Only include the report after this line.
+"""
+
+# Configure generation with search tool
+config = GenerateContentConfig(
+    system_instruction=sys_instruction,
+    tools=[Tool(google_search={})],
+    temperature=0.4,
 )
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+# Run generation with streaming output
+response_stream = client.models.generate_content_stream(
+    model=MODEL_ID,
+    config=config,
+    contents=[COMPANY]
+)
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+# Capture report
+report = io.StringIO()
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+for chunk in response_stream:
+    candidate = chunk.candidates[0]
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    for part in candidate.content.parts:
+        if part.text:
+            display(Markdown(part.text))
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+            # Extract content after the --- line
+            if m := re.search(r'(^|\n)-{3,}\n(.*)$', part.text, re.M | re.S):
+                report.write(m.group(2))
+            elif report.tell():
+                report.write(part.text)
+        else:
+            print(json.dumps(part.model_dump(exclude_none=True), indent=2))
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
-
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+    # Show Google Search suggestions (if any)
+    if gm := candidate.grounding_metadata:
+        if sep := gm.search_entry_point:
+            display(HTML(sep.rendered_content))

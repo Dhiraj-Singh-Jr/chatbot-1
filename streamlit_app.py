@@ -1,4 +1,3 @@
-from google.colab import userdata
 from google import genai
 from google.genai.types import GenerateContentConfig, Tool
 from IPython.display import display, HTML, Markdown
